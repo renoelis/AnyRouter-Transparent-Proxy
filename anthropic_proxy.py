@@ -1,6 +1,7 @@
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import StreamingResponse
 import httpx
+import json
 from typing import Iterable
 from urllib.parse import urlparse
 
@@ -10,6 +11,12 @@ app = FastAPI(title="Anthropic Transparent Proxy", version="1.1")
 
 TARGET_BASE = "https://q.quuvv.cn"
 PRESERVE_HOST = False  # 是否保留原始 Host
+
+# System prompt 替换配置
+# 设置为字符串以替换请求体中 system 数组的第一个元素的 text 内容
+# 设置为 None 则保持原样不修改
+SYSTEM_PROMPT_REPLACEMENT = "You are Claude Code, Anthropic's official CLI for Claude."  # 例如: "你是一个有用的AI助手"
+# SYSTEM_PROMPT_REPLACEMENT =  None
 
 HOP_BY_HOP_HEADERS = {
     "connection",
@@ -53,6 +60,75 @@ def filter_response_headers(headers: Iterable[tuple]) -> dict:
     return out
 
 
+def process_request_body(body: bytes) -> bytes:
+    """
+    处理请求体，替换 system 数组中第一个元素的 text 内容
+
+    Args:
+        body: 原始请求体（bytes）
+
+    Returns:
+        处理后的请求体（bytes），如果无法处理则返回原始 body
+    """
+    # 如果未配置替换文本，直接返回原始 body
+    if SYSTEM_PROMPT_REPLACEMENT is None:
+        print("[System Replacement] Not configured, keeping original body")
+        try:
+            print(f"[System Replacement None] Original system[0].text: {json.loads(body.decode('utf-8'))['system'][0]['text']}")
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            print(f"[System Replacement None] Failed to parse JSON: {e}, keeping original body")
+        return body
+
+    # 尝试解析 JSON
+    try:
+        data = json.loads(body.decode('utf-8'))
+        print("[System Replacement] Successfully parsed JSON body")
+    except (json.JSONDecodeError, UnicodeDecodeError) as e:
+        print(f"[System Replacement] Failed to parse JSON: {e}, keeping original body")
+        return body
+
+    # 检查 system 字段是否存在且为列表
+    if "system" not in data:
+        print("[System Replacement] No 'system' field found, keeping original body")
+        return body
+
+    if not isinstance(data["system"], list):
+        print(f"[System Replacement] 'system' field is not a list (type: {type(data['system'])}), keeping original body")
+        return body
+
+    if len(data["system"]) == 0:
+        print("[System Replacement] 'system' array is empty, keeping original body")
+        return body
+
+    # 获取第一个元素
+    first_element = data["system"][0]
+
+    # 检查第一个元素是否有 'text' 字段
+    if not isinstance(first_element, dict) or "text" not in first_element:
+        print(f"[System Replacement] First element doesn't have 'text' field, keeping original body")
+        return body
+
+    # 记录原始内容
+    original_text = first_element["text"]
+    print(f"[System Replacement] Original system[0].text: {original_text[:100]}..." if len(original_text) > 100 else f"[System Replacement] Original system[0].text: {original_text}")
+
+    # 执行替换
+    first_element["text"] = SYSTEM_PROMPT_REPLACEMENT
+    print(f"[System Replacement] Replaced with: {SYSTEM_PROMPT_REPLACEMENT[:100]}..." if len(SYSTEM_PROMPT_REPLACEMENT) > 100 else f"[System Replacement] Replaced with: {SYSTEM_PROMPT_REPLACEMENT}")
+
+    print(f"[System Replacement] original_text == SYSTEM_PROMPT_REPLACEMENT:{SYSTEM_PROMPT_REPLACEMENT == original_text}")
+
+    # 转换回 JSON bytes
+    try:
+        # 这里必须加 separators 压缩空格，我也不知道为什么有空格不行。。。
+        modified_body = json.dumps(data, ensure_ascii=False, separators=(',', ':')).encode('utf-8')
+        print(f"[System Replacement] Successfully modified body (original size: {len(body)} bytes, new size: {len(modified_body)} bytes)")
+        return modified_body
+    except Exception as e:
+        print(f"[System Replacement] Failed to serialize modified JSON: {e}, keeping original body")
+        return body
+
+
 # ===== 主代理逻辑 =====
 
 @app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"])
@@ -65,7 +141,10 @@ async def proxy(path: str, request: Request):
 
     # 读取 body
     body = await request.body()
-    print(body)
+    print(f"[Proxy] Original body ({len(body)} bytes): {body[:200]}..." if len(body) > 200 else f"[Proxy] Original body: {body}")
+
+    # 处理请求体（替换 system prompt）
+    body = process_request_body(body)
 
     # 复制并过滤请求头
     incoming_headers = list(request.headers.items())
@@ -113,4 +192,4 @@ async def proxy(path: str, request: Request):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("anthropic_proxy:app", host="0.0.0.0", port=8080, reload=True)
+    uvicorn.run("anthropic_proxy:app", host="0.0.0.0", port=8088, reload=True)
