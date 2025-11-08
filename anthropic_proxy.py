@@ -1,11 +1,31 @@
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import StreamingResponse
+from contextlib import asynccontextmanager
 import httpx
 import json
 from typing import Iterable
 from urllib.parse import urlparse
 
-app = FastAPI(title="Anthropic Transparent Proxy", version="1.1")
+# Shared HTTP client for connection pooling and proper lifecycle management
+http_client: httpx.AsyncClient = None  # type: ignore
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    """Manage application lifespan events"""
+    global http_client
+    # Startup: Initialize HTTP client
+    http_client = httpx.AsyncClient(follow_redirects=False, timeout=60.0)
+    yield
+    # Shutdown: Close HTTP client
+    await http_client.aclose()
+
+
+app = FastAPI(
+    title="Anthropic Transparent Proxy",
+    version="1.1",
+    lifespan=lifespan
+)
 
 # ===== 基础配置 =====
 
@@ -47,6 +67,10 @@ def filter_request_headers(headers: Iterable[tuple]) -> dict:
             continue
         if lk == "host" and not PRESERVE_HOST:
             continue
+        # 移除 Content-Length，让 httpx 根据实际内容自动计算
+        # 因为我们可能会修改请求体，导致长度改变
+        if lk == "content-length":
+            continue
         out[k] = v
     return out
 
@@ -73,10 +97,10 @@ def process_request_body(body: bytes) -> bytes:
     # 如果未配置替换文本，直接返回原始 body
     if SYSTEM_PROMPT_REPLACEMENT is None:
         print("[System Replacement] Not configured, keeping original body")
-        try:
-            print(f"[System Replacement None] Original system[0].text: {json.loads(body.decode('utf-8'))['system'][0]['text']}")
-        except (json.JSONDecodeError, UnicodeDecodeError) as e:
-            print(f"[System Replacement None] Failed to parse JSON: {e}, keeping original body")
+        # try:
+        #     print(f"[System Replacement None] Original system[0].text: {json.loads(body.decode('utf-8'))['system'][0]['text']}")
+        # except (json.JSONDecodeError, UnicodeDecodeError, KeyError, IndexError, TypeError) as e:
+        #     print(f"[System Replacement None] Failed to parse or access system prompt: {e}")
         return body
 
     # 尝试解析 JSON
@@ -166,28 +190,27 @@ async def proxy(path: str, request: Request):
         forward_headers["X-Forwarded-For"] = f"{existing}, {client_host}" if existing else client_host
 
     # 发起上游请求
-    async with httpx.AsyncClient(follow_redirects=False, timeout=60.0) as client:
-        try:
-            resp = await client.request(
-                method=request.method,
-                url=target_url,
-                headers=forward_headers,
-                content=body,
-            )
-        except httpx.RequestError as e:
-            return Response(content=f"Upstream request failed: {e}", status_code=502)
-
-        response_headers = filter_response_headers(resp.headers.items())
-
-        async def iter_response():
-            async for chunk in resp.aiter_bytes():
-                yield chunk
-
-        return StreamingResponse(
-            iter_response(),
-            status_code=resp.status_code,
-            headers=response_headers,
+    try:
+        resp = await http_client.request(
+            method=request.method,
+            url=target_url,
+            headers=forward_headers,
+            content=body,
         )
+    except httpx.RequestError as e:
+        return Response(content=f"Upstream request failed: {e}", status_code=502)
+
+    response_headers = filter_response_headers(resp.headers.items())
+
+    async def iter_response():
+        async for chunk in resp.aiter_bytes():
+            yield chunk
+
+    return StreamingResponse(
+        iter_response(),
+        status_code=resp.status_code,
+        headers=response_headers,
+    )
 
 
 if __name__ == "__main__":
