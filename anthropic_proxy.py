@@ -44,6 +44,52 @@ PRESERVE_HOST = False  # 是否保留原始 Host
 SYSTEM_PROMPT_REPLACEMENT = os.getenv("SYSTEM_PROMPT_REPLACEMENT")  # 例如: "你是一个有用的AI助手"
 print(f"System prompt replacement: {SYSTEM_PROMPT_REPLACEMENT}")
 
+
+# 自定义 Header 配置
+# 从 env/.env.headers.json 文件加载，如果文件不存在或解析失败，则使用空字典 {}
+def load_custom_headers() -> dict:
+    """
+    从 env/.env.headers.json 文件加载自定义请求头配置
+
+    Returns:
+        dict: 自定义请求头字典，如果加载失败则返回空字典 {}
+    """
+    headers_file = "env/.env.headers.json"
+
+    # 检查文件是否存在
+    if not os.path.exists(headers_file):
+        print(f"[Custom Headers] Config file '{headers_file}' not found, using default empty dict {{}}")
+        return {}
+
+    # 尝试读取和解析 JSON 文件
+    try:
+        with open(headers_file, 'r', encoding='utf-8') as f:
+            headers = json.load(f)
+
+        # 验证是否为字典类型
+        if not isinstance(headers, dict):
+            print(f"[Custom Headers] Config file content is not a dict (type: {type(headers)}), using default empty dict {{}}")
+            return {}
+
+        # 过滤掉以 __ 开头的注释字段
+        filtered_headers = {k: v for k, v in headers.items() if not k.startswith("__")}
+
+        print(f"[Custom Headers] Successfully loaded {len(filtered_headers)} custom headers from '{headers_file}'")
+        if filtered_headers:
+            print(f"[Custom Headers] Loaded headers: {list(filtered_headers.keys())}")
+
+        return filtered_headers
+
+    except json.JSONDecodeError as e:
+        print(f"[Custom Headers] Failed to parse JSON from '{headers_file}': {e}, using default empty dict {{}}")
+        return {}
+    except Exception as e:
+        print(f"[Custom Headers] Failed to load '{headers_file}': {e}, using default empty dict {{}}")
+        return {}
+
+
+CUSTOM_HEADERS = load_custom_headers()
+
 HOP_BY_HOP_HEADERS = {
     "connection",
     "keep-alive",
@@ -53,13 +99,6 @@ HOP_BY_HOP_HEADERS = {
     "trailers",
     "transfer-encoding",
     "upgrade",
-}
-
-# 可选自定义 Header（覆盖原请求同名项）
-CUSTOM_HEADERS = {
-    # 例如：
-    # "User-Agent": "Claude-Proxy/1.0",
-    # "x-anthropic-system-prompt": "你是一个透明代理，请保持请求不变。",
 }
 
 

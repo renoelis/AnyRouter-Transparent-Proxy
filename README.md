@@ -1,6 +1,6 @@
 # AnyRouter Transparent Proxy
 
-一个基于 FastAPI 的轻量级透明 HTTP 代理服务，专为解决 AnyRouter 的 Anthropic API 在 Claude Code 中报错 500 的问题而设计。
+一个基于 FastAPI 的轻量级透明 HTTP 代理服务，专为解决 AnyRouter 的 Anthropic API 在 Claude Code for VS Code 插件中报错 500 的问题而设计。
 
 ## 目录
 
@@ -42,6 +42,8 @@ cp .env.example .env
 
 # 启动服务
 docker-compose up -d
+# 若部署后有改动过项目源码，则需要加上 --build --remove-orphans 重新构建
+docker-compose up -d --build --remove-orphans 
 
 # 查看日志
 docker-compose logs -f
@@ -99,7 +101,37 @@ python anthropic_proxy.py
 API_BASE_URL=https://anyrouter.top
 # 或使用备用地址
 # API_BASE_URL=https://q.quuvv.cn
+
+# System Prompt 替换（可选）
+# 替换请求体中 system 数组的第一个元素的 text 内容
+SYSTEM_PROMPT_REPLACEMENT="You are Claude Code, Anthropic's official CLI for Claude."
 ```
+
+### 自定义请求头（可选）
+
+可以通过 `env/.env.headers.json` 文件配置自定义请求头，这些头部会被注入到所有代理请求中。
+
+**配置步骤：**
+
+1. 复制模板文件创建配置：
+   ```bash
+   cp .env.headers.json.example env/.env.headers.json
+   ```
+
+2. 编辑 `env/.env.headers.json` 文件，添加你需要的请求头：
+   ```json
+   {
+     "User-Agent": "claude-cli/2.0.8 (external, cli)"
+   }
+   ```
+
+3. 重启服务使配置生效
+
+**说明：**
+- 配置文件使用标准 JSON 格式
+- 以 `__` 开头的字段会被忽略（可用于添加注释）
+- 如果文件不存在，默认使用空配置 `{}`
+- 自定义请求头会覆盖原请求中的同名头部
 
 > 注：配置完成后需要重新启动服务
 
