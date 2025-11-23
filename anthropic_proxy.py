@@ -210,12 +210,13 @@ async def proxy(path: str, request: Request):
 
     # 读取 body
     body = await request.body()
-    # print(f"[Proxy] Original body ({len(body)} bytes): {body[:200]}..." if len(body) > 200 else f"[Proxy] Original body: {body}")
-    try:
-        data = json.loads(body.decode('utf-8'))
-        print(f"[Proxy] Original body ({len(body)} bytes): {data}")
-    except (json.JSONDecodeError, UnicodeDecodeError) as e:
-        print(f"[Proxy] Failed to parse JSON: {e}")
+    # 注释掉详细日志,避免输出过长
+    # try:
+    #     data = json.loads(body.decode('utf-8'))
+    #     print(f"[Proxy] Original body ({len(body)} bytes): {data}")
+    # except (json.JSONDecodeError, UnicodeDecodeError) as e:
+    #     print(f"[Proxy] Failed to parse JSON: {e}")
+    print(f"[Proxy] Request: {request.method} {path} (body: {len(body)} bytes)")
 
     # 处理请求体（替换 system prompt）
     body = process_request_body(body)
@@ -247,7 +248,13 @@ async def proxy(path: str, request: Request):
             headers=forward_headers,
             content=body,
         )
+        print(f"[Proxy] Upstream response: {resp.status_code} from {target_url}")
+        if resp.status_code >= 400:
+            # 打印错误响应的前 500 字符
+            body_preview = (await resp.aread())[:500]
+            print(f"[Proxy] Error response preview: {body_preview}")
     except httpx.RequestError as e:
+        print(f"[Proxy] Upstream request failed: {e}")
         return Response(content=f"Upstream request failed: {e}", status_code=502)
 
     response_headers = filter_response_headers(resp.headers.items())

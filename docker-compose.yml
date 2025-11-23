@@ -11,7 +11,11 @@ services:
       - API_BASE_URL=${API_BASE_URL:-https://anyrouter.top}
       - SYSTEM_PROMPT_REPLACEMENT=${SYSTEM_PROMPT_REPLACEMENT:-You are Claude Code, Anthropic's official CLI for Claude.}
     env_file:
-      - .env  # 如果存在 .env 文件，会自动加载
+      - .env  # 如果存在 .env 文件,会自动加载
+    # 配置 DNS 服务器,绕过 VPN 的 DNS 污染
+    dns:
+      - 1.1.1.1    # Cloudflare DNS
+      - 8.8.8.8    # Google DNS
     volumes:
       # 挂载自定义 Header 配置文件（可选）
       - ./env/:/app/env/
